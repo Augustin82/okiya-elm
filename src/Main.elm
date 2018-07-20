@@ -5,6 +5,8 @@ import Element exposing (..)
 import Element.Background as Background
 import Element.Border as Border
 import Element.Events exposing (..)
+import Element.Font as Font
+import Element.Input as Input
 import Html exposing (Html)
 import Random
 import Random.List
@@ -16,6 +18,7 @@ import Random.List
 type Model
     = Loading
     | Playing Game
+    | Victory Player Game
 
 
 type alias Game =
@@ -48,6 +51,13 @@ type alias Tile =
     , player : Maybe Player
     , id : TileId
     , selectable : Bool
+    , coords : Coords
+    }
+
+
+type alias Coords =
+    { x : Int
+    , y : Int
     }
 
 
@@ -113,7 +123,7 @@ tiles =
         |> List.indexedMap
             (\i t ->
                 features
-                    |> List.indexedMap (\j f -> Tile t f Nothing (i * 4 + j) False)
+                    |> List.indexedMap (\j f -> Tile t f Nothing (i * 4 + j) False (Coords 0 0))
             )
         |> List.concat
 
@@ -140,9 +150,9 @@ makeBoardFromTiles tiles =
                     |> List.indexedMap
                         (\j t ->
                             if i == 0 || i == 3 || j == 0 || j == 3 then
-                                { t | selectable = True }
+                                { t | selectable = True, coords = Coords i j }
                             else
-                                t
+                                { t | coords = Coords i j }
                         )
             )
 
@@ -173,6 +183,7 @@ generateRandomBoard =
 
 type Msg
     = NoOp
+    | Reset
     | GeneratedRandomBoard (List Tile)
     | SelectTile Int
 
@@ -184,63 +195,167 @@ update msg model =
             ( Playing <| cleanGame randomBoard, Cmd.none )
 
         SelectTile id ->
-            ( model |> selectTile id |> nextPlayer, Cmd.none )
+            case model of
+                Playing game ->
+                    let
+                        currentPlayer =
+                            game.player
 
-        _ ->
+                        newGame =
+                            game |> selectTile id |> nextPlayer
+
+                        newModel =
+                            evaluateVictory currentPlayer newGame
+                    in
+                    ( newModel, Cmd.none )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        Reset ->
+            ( model, generateRandomBoard )
+
+        NoOp ->
             ( model, Cmd.none )
 
 
-nextPlayer : Model -> Model
-nextPlayer model =
-    case model of
-        Playing game ->
-            let
-                newPlayer =
-                    case game.player of
-                        Red ->
-                            Blue
-
-                        Blue ->
-                            Red
-            in
-            Playing { game | player = newPlayer }
-
-        _ ->
-            model
+noTilesLeft : Game -> Bool
+noTilesLeft newGame =
+    newGame
+        |> .board
+        |> List.concat
+        |> List.filter .selectable
+        |> (==) []
 
 
-selectTile : Int -> Model -> Model
-selectTile id model =
-    case model of
-        Playing game ->
-            let
-                board =
-                    game.board
+hasFullLine : Player -> Game -> Bool
+hasFullLine player newGame =
+    let
+        selectedTiles =
+            newGame
+                |> .board
+                |> List.concat
+                |> List.filter (\tile -> tile.player == Just player)
 
-                player =
-                    game.player
+        hasStraightLine axis =
+            [ 0, 1, 2, 3 ]
+                |> List.foldl
+                    (\pos acc ->
+                        acc
+                            || (selectedTiles
+                                    |> List.filter (.coords >> axis >> (==) pos)
+                                    |> List.length
+                                    |> (==) 4
+                               )
+                    )
+                    False
 
-                selectedTile =
-                    getTileById board id
+        hasTopLeftDiagonal _ =
+            selectedTiles
+                |> List.filter (\t -> t.coords == Coords 0 0 || t.coords == Coords 1 1 || t.coords == Coords 2 2 || t.coords == Coords 3 3)
+                |> List.length
+                |> (==) 4
 
-                newBoard =
-                    List.map
-                        (\r ->
-                            List.map
-                                (\t ->
-                                    if t.id == id then
-                                        { t | player = Just player, selectable = False }
-                                    else
-                                        { t | selectable = selectedTile |> Maybe.map (isValidSelection t) |> Maybe.withDefault t.selectable }
+        hasBottomLeftDiagonal _ =
+            selectedTiles
+                |> List.filter (\t -> t.coords == Coords 0 3 || t.coords == Coords 1 2 || t.coords == Coords 2 1 || t.coords == Coords 3 0)
+                |> List.length
+                |> (==) 4
+    in
+    hasStraightLine .y || hasStraightLine .x || hasTopLeftDiagonal () || hasBottomLeftDiagonal ()
+
+
+hasSquare : Player -> Game -> Bool
+hasSquare player game =
+    let
+        selectedTiles =
+            game
+                |> .board
+                |> List.concat
+                |> List.filter (\tile -> tile.player == Just player)
+    in
+    [ 0, 1, 2 ]
+        |> List.foldl
+            (\startX acc ->
+                acc
+                    || ([ 0, 1, 2 ]
+                            |> List.foldl
+                                (\startY acc ->
+                                    acc
+                                        || (selectedTiles
+                                                |> List.filter (\tile -> (tile.coords.x == startX || tile.coords.x == startX + 1) && (tile.coords.y == startY || tile.coords.y == startY + 1))
+                                                |> List.length
+                                                |> (==) 4
+                                           )
                                 )
-                                r
-                        )
-                        board
-            in
-            Playing { game | board = newBoard, selected = Just id }
+                                False
+                       )
+            )
+            False
 
-        _ ->
-            model
+
+evaluateVictory : Player -> Game -> Model
+evaluateVictory player game =
+    if noTilesLeft game then
+        Victory player game
+    else if hasFullLine player game then
+        Victory player game
+    else if hasSquare player game then
+        Victory player game
+    else
+        Playing game
+
+
+nextPlayer : Game -> Game
+nextPlayer game =
+    let
+        newPlayer =
+            case game.player of
+                Red ->
+                    Blue
+
+                Blue ->
+                    Red
+    in
+    { game | player = newPlayer }
+
+
+selectTile : Int -> Game -> Game
+selectTile id game =
+    let
+        board =
+            game.board
+
+        player =
+            game.player
+
+        selectedTile =
+            getTileById board id
+
+        newBoard =
+            List.map
+                (\r ->
+                    List.map
+                        (\t ->
+                            if t.id == id then
+                                { t | player = Just player, selectable = False }
+                            else
+                                { t
+                                    | selectable =
+                                        t.player
+                                            |> Maybe.map (always False)
+                                            |> Maybe.withDefault
+                                                (selectedTile
+                                                    |> Maybe.map (isValidSelection t)
+                                                    |> Maybe.withDefault t.selectable
+                                                )
+                                }
+                        )
+                        r
+                )
+                board
+    in
+    { game | board = newBoard, selected = Just id }
 
 
 
@@ -249,14 +364,43 @@ selectTile id model =
 
 view : Model -> Html Msg
 view model =
-    layout [] <|
+    layout [ padding 20 ] <|
         case model of
             Loading ->
                 el [] <| text "Chargement en cours..."
 
             Playing game ->
-                column []
-                    [ viewBoard game ]
+                column [ spacing 20 ]
+                    [ viewBoard game, resetButton ]
+
+            Victory player game ->
+                column [ spacing 20 ]
+                    [ viewBoard game, viewVictoryMessage player, resetButton ]
+
+
+resetButton : Element Msg
+resetButton =
+    el [ centerX, centerY ] <|
+        Input.button
+            [ Background.color <| Color.rgb 150 150 150
+            , Font.color <| Color.rgb 255 255 255
+            , padding 10
+            ]
+            { onPress = Just Reset
+            , label = text "Recommencer"
+            }
+
+
+viewVictoryMessage : Player -> Element Msg
+viewVictoryMessage player =
+    el [ centerX ] <|
+        text <|
+            "Victoire du joueur "
+                ++ (if player == Red then
+                        "rouge !"
+                    else
+                        "bleu !"
+                   )
 
 
 viewBoard : { a | board : Board, selected : Maybe TileId } -> Element Msg
@@ -268,10 +412,13 @@ viewBoard { board, selected } =
 
         viewSelectedTile =
             selectedTile
-                |> Maybe.map viewBlankTile
+                |> Maybe.map (\t -> row [ centerX, width shrink, spacing 20 ] [ text "Dernière tuile :", viewBlankTile t ])
                 |> Maybe.withDefault (el [ centerX ] <| text "Choisissez une tuile sur les bords !")
     in
-    board |> List.map (viewRow selectedTile) |> (::) viewSelectedTile |> column []
+    column [ spacing 20 ]
+        [ viewSelectedTile
+        , board |> List.map (viewRow selectedTile) |> column []
+        ]
 
 
 getTileById : Board -> TileId -> Maybe Tile
