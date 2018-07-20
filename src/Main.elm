@@ -3,11 +3,11 @@ module Main exposing (..)
 import Color
 import Element exposing (..)
 import Element.Background as Background
+import Element.Border as Border
 import Element.Events exposing (..)
 import Html exposing (Html)
-import Process
-import Task
-import Time
+import Random
+import Random.List
 
 
 ---- MODEL ----
@@ -47,6 +47,7 @@ type alias Tile =
     , feature : Feature
     , player : Maybe Player
     , id : TileId
+    , selectable : Bool
     }
 
 
@@ -112,13 +113,13 @@ tiles =
         |> List.indexedMap
             (\i t ->
                 features
-                    |> List.indexedMap (\j f -> Tile t f Nothing (i * 4 + j))
+                    |> List.indexedMap (\j f -> Tile t f Nothing (i * 4 + j) False)
             )
         |> List.concat
 
 
-stupidBoard : Board
-stupidBoard =
+makeBoardFromTiles : List Tile -> Board
+makeBoardFromTiles tiles =
     tiles
         |> List.foldr
             (\tile list ->
@@ -133,6 +134,17 @@ stupidBoard =
                             [ tile ] :: h :: l
             )
             []
+        |> List.indexedMap
+            (\i row ->
+                row
+                    |> List.indexedMap
+                        (\j t ->
+                            if i == 0 || i == 3 || j == 0 || j == 3 then
+                                { t | selectable = True }
+                            else
+                                t
+                        )
+            )
 
 
 type Player
@@ -142,22 +154,17 @@ type Player
 
 init : ( Model, Cmd Msg )
 init =
-    ( Loading, getSavedState )
+    ( Loading, generateRandomBoard )
 
 
-cleanGame : Game
-cleanGame =
-    { board = stupidBoard, score = [ ( Red, 0 ), ( Blue, 0 ) ], player = Red, selected = Nothing }
+cleanGame : List Tile -> Game
+cleanGame randomTiles =
+    { board = makeBoardFromTiles randomTiles, score = [ ( Red, 0 ), ( Blue, 0 ) ], player = Red, selected = Nothing }
 
 
-getSavedState : Cmd Msg
-getSavedState =
-    Process.sleep (1 * Time.second)
-        |> Task.andThen
-            (\_ ->
-                Task.succeed ReadLocalStorage
-            )
-        |> Task.perform identity
+generateRandomBoard : Cmd Msg
+generateRandomBoard =
+    Random.generate GeneratedRandomBoard <| Random.List.shuffle tiles
 
 
 
@@ -166,15 +173,15 @@ getSavedState =
 
 type Msg
     = NoOp
-    | ReadLocalStorage
+    | GeneratedRandomBoard (List Tile)
     | SelectTile Int
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
-        ReadLocalStorage ->
-            ( Playing cleanGame, Cmd.none )
+        GeneratedRandomBoard randomBoard ->
+            ( Playing <| cleanGame randomBoard, Cmd.none )
 
         SelectTile id ->
             ( model |> selectTile id |> nextPlayer, Cmd.none )
@@ -213,15 +220,18 @@ selectTile id model =
                 player =
                     game.player
 
+                selectedTile =
+                    getTileById board id
+
                 newBoard =
                     List.map
                         (\r ->
                             List.map
                                 (\t ->
                                     if t.id == id then
-                                        { t | player = Just player }
+                                        { t | player = Just player, selectable = False }
                                     else
-                                        t
+                                        { t | selectable = selectedTile |> Maybe.map (isValidSelection t) |> Maybe.withDefault t.selectable }
                                 )
                                 r
                         )
@@ -302,30 +312,25 @@ viewTile selectedTile ({ id, tree, feature, player } as tile) =
     el [ centerX, centerY, width <| px 150, height <| px 150 ] <|
         (player
             |> Maybe.map playerTile
-            |> Maybe.withDefault (viewBlankTile tile |> clickWrapper selectedTile tile)
+            |> Maybe.withDefault (tile |> viewBlankTile |> clickWrapper tile)
         )
 
 
-clickWrapper : Maybe Tile -> Tile -> Element Msg -> Element Msg
-clickWrapper selectedTile tile element =
+isValidSelection : Tile -> Tile -> Bool
+isValidSelection tile st =
+    tile.feature == st.feature || tile.tree == st.tree
+
+
+clickWrapper : Tile -> Element Msg -> Element Msg
+clickWrapper tile element =
     let
-        isClickable =
-            (tile.player == Nothing)
-                && (case selectedTile of
-                        Just st ->
-                            tile.feature == st.feature || tile.tree == st.tree
-
-                        Nothing ->
-                            True
-                   )
-
         clickAttrs =
-            if isClickable then
+            if tile.selectable then
                 [ onClick <| SelectTile tile.id ]
             else
-                []
+                [ Background.color <| Color.rgba 0 0 0 0.3 ]
     in
-    el (clickAttrs ++ [ height fill, width fill ]) <|
+    el (clickAttrs ++ [ height fill, width fill, Border.color <| Color.rgb 0 0 0, Border.width 1 ]) <|
         element
 
 
