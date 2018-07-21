@@ -8,6 +8,7 @@ import Element.Events exposing (..)
 import Element.Font as Font
 import Element.Input as Input
 import Html exposing (Html)
+import Html.Attributes as HA
 import Random
 import Random.List
 
@@ -18,6 +19,7 @@ import Random.List
 type Model
     = Loading
     | Playing Game
+    | Draw Game
     | Victory Player Game
 
 
@@ -68,6 +70,13 @@ type Tree
     | Maple
 
 
+type Feature
+    = Sun
+    | Rain
+    | Bird
+    | Tanzaku
+
+
 trees : List Tree
 trees =
     [ Pine, Cherry, Iris, Maple ]
@@ -103,13 +112,6 @@ featureToString feature =
 
         Tanzaku ->
             "Tanzaku"
-
-
-type Feature
-    = Sun
-    | Rain
-    | Bird
-    | Tanzaku
 
 
 features : List Feature
@@ -224,6 +226,15 @@ noTilesLeft newGame =
     newGame
         |> .board
         |> List.concat
+        |> List.filter (.player >> (==) Nothing)
+        |> (==) []
+
+
+noPlayLeft : Game -> Bool
+noPlayLeft newGame =
+    newGame
+        |> .board
+        |> List.concat
         |> List.filter .selectable
         |> (==) []
 
@@ -297,6 +308,8 @@ hasSquare player game =
 evaluateVictory : Player -> Game -> Model
 evaluateVictory player game =
     if noTilesLeft game then
+        Draw game
+    else if noPlayLeft game then
         Victory player game
     else if hasFullLine player game then
         Victory player game
@@ -365,22 +378,27 @@ selectTile id game =
 view : Model -> Html Msg
 view model =
     layout [ padding 20 ] <|
-        case model of
-            Loading ->
-                el [] <| text "Chargement en cours..."
+        column [ spacing 20, width shrink ] <|
+            case model of
+                Loading ->
+                    [ el [] <| text "Chargement en cours..." ]
 
-            Playing game ->
-                column [ spacing 20 ]
+                Playing game ->
                     [ viewBoard game, resetButton ]
 
-            Victory player game ->
-                column [ spacing 20 ]
+                Draw game ->
+                    [ viewBoard game, viewDrawMessage, resetButton ]
+
+                Victory player game ->
                     [ viewBoard game, viewVictoryMessage player, resetButton ]
 
 
 resetButton : Element Msg
 resetButton =
-    el [ centerX, centerY ] <|
+    el
+        [ centerY
+        ]
+    <|
         Input.button
             [ Background.color <| Color.rgb 150 150 150
             , Font.color <| Color.rgb 255 255 255
@@ -393,7 +411,16 @@ resetButton =
 
 viewVictoryMessage : Player -> Element Msg
 viewVictoryMessage player =
-    el [ centerX ] <|
+    el
+        [ centerX
+        , Background.color <| getPlayerColor player
+        , Font.color <| Color.rgb 255 255 255
+        , Font.bold
+        , Font.size 30
+        , width fill
+        , padding 20
+        ]
+    <|
         text <|
             "Victoire du joueur "
                 ++ (if player == Red then
@@ -403,22 +430,61 @@ viewVictoryMessage player =
                    )
 
 
-viewBoard : { a | board : Board, selected : Maybe TileId } -> Element Msg
-viewBoard { board, selected } =
+viewDrawMessage : Element Msg
+viewDrawMessage =
+    el [ centerX ] <| text "Match nul !"
+
+
+viewBoard : { a | board : Board, player : Player, selected : Maybe TileId } -> Element Msg
+viewBoard { board, player, selected } =
     let
         selectedTile =
             selected
                 |> Maybe.andThen (getTileById board)
-
-        viewSelectedTile =
-            selectedTile
-                |> Maybe.map (\t -> row [ centerX, width shrink, spacing 20 ] [ text "Dernière tuile :", viewBlankTile t ])
-                |> Maybe.withDefault (el [ centerX ] <| text "Choisissez une tuile sur les bords !")
     in
     column [ spacing 20 ]
-        [ viewSelectedTile
-        , board |> List.map (viewRow selectedTile) |> column []
+        [ viewGameInfoHeader player selectedTile
+        , board |> List.map (viewRow selectedTile) |> column [ width shrink, Border.width 1 ]
         ]
+
+
+viewGameInfoHeader : Player -> Maybe Tile -> Element Msg
+viewGameInfoHeader currentPlayer selectedTile =
+    row [ height <| px 100 ]
+        [ playerTurnIndicator Red currentPlayer
+        , selectedTile
+            |> Maybe.map tileIndicator
+            |> Maybe.withDefault (el [ centerX ] <| text "Choisissez une tuile sur les bords")
+        , playerTurnIndicator Blue currentPlayer
+        ]
+
+
+tileIndicator : Tile -> Element Msg
+tileIndicator tile =
+    column
+        [ centerX
+        , width shrink
+        , height shrink
+        ]
+        [ text "Choisissez une tuile avec :"
+        , paragraph [ centerX, width shrink ]
+            [ tile.tree |> treeToString |> text
+            , text " ou "
+            , tile.feature |> featureToString |> text
+            ]
+        ]
+
+
+playerTurnIndicator : Player -> Player -> Element Msg
+playerTurnIndicator player currentPlayer =
+    let
+        color =
+            if player == currentPlayer then
+                getPlayerColor player
+            else
+                Color.rgb 255 255 255
+    in
+    el [ centerY, height <| px 30, width <| px 30, Border.color color, Background.color color, Border.width 1, Border.rounded 15 ] <| text " "
 
 
 getTileById : Board -> TileId -> Maybe Tile
@@ -456,7 +522,7 @@ viewRow selectedTile rows =
 
 viewTile : Maybe Tile -> Tile -> Element Msg
 viewTile selectedTile ({ id, tree, feature, player } as tile) =
-    el [ centerX, centerY, width <| px 150, height <| px 150 ] <|
+    el [ centerX, centerY, width <| px 110, height <| px 110, Border.width 1 ] <|
         (player
             |> Maybe.map playerTile
             |> Maybe.withDefault (tile |> viewBlankTile |> clickWrapper tile)
@@ -473,11 +539,11 @@ clickWrapper tile element =
     let
         clickAttrs =
             if tile.selectable then
-                [ onClick <| SelectTile tile.id ]
+                [ htmlAttribute <| HA.style [ ( "cursor", "pointer" ) ], onClick <| SelectTile tile.id ]
             else
-                [ Background.color <| Color.rgba 0 0 0 0.3 ]
+                [ htmlAttribute <| HA.style [ ( "cursor", "not-allowed" ) ], Background.color <| Color.rgba 0 0 0 0.3 ]
     in
-    el (clickAttrs ++ [ height fill, width fill, Border.color <| Color.rgb 0 0 0, Border.width 1 ]) <|
+    el (clickAttrs ++ [ height fill, width fill, Border.color <| Color.rgb 0 0 0 ]) <|
         element
 
 
@@ -496,16 +562,27 @@ viewBlankTile ({ id, tree, feature, player } as tile) =
 
 playerTile : Player -> Element msg
 playerTile player =
-    let
-        color =
-            case player of
-                Red ->
-                    Color.rgb 255 0 0
+    el
+        [ htmlAttribute <| HA.style [ ( "cursor", "not-allowed" ) ]
+        , centerY
+        , centerX
+        , width <| px 90
+        , height <| px 90
+        , Border.rounded 45
+        , Background.color (getPlayerColor player)
+        ]
+    <|
+        text " "
 
-                Blue ->
-                    Color.rgb 0 0 255
-    in
-    el [ width fill, height fill, Background.color color ] <| text " "
+
+getPlayerColor : Player -> Color.Color
+getPlayerColor player =
+    case player of
+        Red ->
+            Color.rgb 255 0 0
+
+        Blue ->
+            Color.rgb 125 125 200
 
 
 
