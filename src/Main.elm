@@ -384,7 +384,7 @@ view model =
                     [ el [] <| text "Chargement en cours..." ]
 
                 Playing game ->
-                    [ viewBoard game, resetButton ]
+                    [ viewInstructions, viewBoard game, resetButton ]
 
                 Draw game ->
                     [ viewBoard game, viewDrawMessage, resetButton ]
@@ -393,16 +393,26 @@ view model =
                     [ viewBoard game, viewVictoryMessage player, resetButton ]
 
 
+viewInstructions : Element msg
+viewInstructions =
+    paragraph []
+        [ text "À tour de rôle, chaque joueur remplace une tuile par un de ses pions. Le but du jeu est de former une ligne (horizontale, verticale, diagonale) de quatre pions, ou un carré de quatre pions. On ne peut choisir une tuile que si elle a un point commun (arbre ou symbole) avec la dernière tuile choisie."
+        ]
+
+
 resetButton : Element Msg
 resetButton =
     el
         [ centerY
+        , centerX
+        , width shrink
         ]
     <|
         Input.button
             [ Background.color <| Color.rgb 150 150 150
             , Font.color <| Color.rgb 255 255 255
             , padding 10
+            , width <| px 150
             ]
             { onPress = Just Reset
             , label = text "Recommencer"
@@ -442,7 +452,7 @@ viewBoard { board, player, selected } =
             selected
                 |> Maybe.andThen (getTileById board)
     in
-    column [ spacing 20 ]
+    column [ width shrink, centerX, spacing 20 ]
         [ viewGameInfoHeader player selectedTile
         , board |> List.map (viewRow selectedTile) |> column [ width shrink, Border.width 1 ]
         ]
