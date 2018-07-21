@@ -1,4 +1,4 @@
-module Main exposing (..)
+port module Main exposing (..)
 
 import Color
 import Element exposing (..)
@@ -9,8 +9,21 @@ import Element.Font as Font
 import Element.Input as Input
 import Html exposing (Html)
 import Html.Attributes as HA
+import Json.Decode as D
+import Json.Decode.Pipeline as P
+import Json.Encode as E
 import Random
 import Random.List
+
+
+port loadGame : () -> Cmd msg
+
+
+port saveGame : E.Value -> Cmd msg
+
+
+port gameLoaded : (E.Value -> msg) -> Sub msg
+
 
 
 ---- MODEL ----
@@ -166,7 +179,176 @@ type Player
 
 init : ( Model, Cmd Msg )
 init =
-    ( Loading, generateRandomBoard )
+    ( Loading, loadGame () )
+
+
+subscriptions : Model -> Sub Msg
+subscriptions model =
+    gameLoaded (decodeGame >> GameLoaded)
+
+
+decodeGame : E.Value -> Maybe Game
+decodeGame value =
+    D.decodeValue gameDecoder value
+        |> Result.toMaybe
+
+
+gameDecoder : D.Decoder Game
+gameDecoder =
+    P.decode Game
+        |> P.required "board" boardDecoder
+        |> P.hardcoded []
+        -- no score yet
+        |> P.required "player" playerDecoder
+        |> P.required "selected" (D.nullable tileIdDecoder)
+
+
+boardDecoder : D.Decoder Board
+boardDecoder =
+    D.list rowDecoder
+
+
+rowDecoder : D.Decoder Row
+rowDecoder =
+    D.list tileDecoder
+
+
+tileDecoder : D.Decoder Tile
+tileDecoder =
+    P.decode Tile
+        |> P.required "tree" treeDecoder
+        |> P.required "feature" featureDecoder
+        |> P.required "player" (D.nullable playerDecoder)
+        |> P.required "id" tileIdDecoder
+        |> P.required "selectable" D.bool
+        |> P.required "coords" coordsDecoder
+
+
+gameEncoder : Game -> E.Value
+gameEncoder { board, score, player, selected } =
+    E.object
+        [ ( "board", boardEncoder board )
+        , ( "score", E.list [] )
+        , ( "player", playerEncoder player )
+        , ( "selected", selected |> Maybe.map E.int |> Maybe.withDefault E.null )
+        ]
+
+
+boardEncoder : Board -> E.Value
+boardEncoder =
+    List.map rowEncoder >> E.list
+
+
+rowEncoder : List Tile -> E.Value
+rowEncoder =
+    List.map tileEncoder >> E.list
+
+
+tileEncoder : Tile -> E.Value
+tileEncoder { tree, feature, player, id, selectable, coords } =
+    E.object
+        [ ( "tree", treeEncoder tree )
+        , ( "feature", featureEncoder feature )
+        , ( "player", player |> Maybe.map playerEncoder |> Maybe.withDefault E.null )
+        , ( "id", E.int id )
+        , ( "selectable", E.bool selectable )
+        , ( "coords", coordsEncoder coords )
+        ]
+
+
+treeEncoder : Tree -> E.Value
+treeEncoder =
+    toString >> E.string
+
+
+featureEncoder : Feature -> E.Value
+featureEncoder =
+    toString >> E.string
+
+
+playerEncoder : Player -> E.Value
+playerEncoder =
+    toString >> E.string
+
+
+coordsEncoder : Coords -> E.Value
+coordsEncoder { x, y } =
+    E.object [ ( "x", E.int x ), ( "y", E.int y ) ]
+
+
+treeDecoder : D.Decoder Tree
+treeDecoder =
+    D.string
+        |> D.andThen
+            (\s ->
+                case s of
+                    "Pine" ->
+                        D.succeed Pine
+
+                    "Iris" ->
+                        D.succeed Iris
+
+                    "Cherry" ->
+                        D.succeed Cherry
+
+                    "Maple" ->
+                        D.succeed Maple
+
+                    _ ->
+                        D.fail "Unknown tree"
+            )
+
+
+featureDecoder : D.Decoder Feature
+featureDecoder =
+    D.string
+        |> D.andThen
+            (\s ->
+                case s of
+                    "Bird" ->
+                        D.succeed Bird
+
+                    "Sun" ->
+                        D.succeed Sun
+
+                    "Rain" ->
+                        D.succeed Rain
+
+                    "Tanzaku" ->
+                        D.succeed Tanzaku
+
+                    _ ->
+                        D.fail "Unknown feature"
+            )
+
+
+coordsDecoder : D.Decoder Coords
+coordsDecoder =
+    P.decode Coords
+        |> P.required "x" D.int
+        |> P.required "y" D.int
+
+
+playerDecoder : D.Decoder Player
+playerDecoder =
+    D.string
+        |> D.andThen
+            (\s ->
+                case s of
+                    "Red" ->
+                        D.succeed Red
+
+                    "Blue" ->
+                        D.succeed Blue
+
+                    _ ->
+                        D.fail <| "Unknown player: " ++ s
+            )
+
+
+tileIdDecoder : D.Decoder TileId
+tileIdDecoder =
+    D.int
 
 
 cleanGame : List Tile -> Game
@@ -188,13 +370,26 @@ type Msg
     | Reset
     | GeneratedRandomBoard (List Tile)
     | SelectTile Int
+    | GameLoaded (Maybe Game)
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
+        GameLoaded maybeGame ->
+            case maybeGame of
+                Nothing ->
+                    ( model, generateRandomBoard )
+
+                Just game ->
+                    ( Playing game, Cmd.none )
+
         GeneratedRandomBoard randomBoard ->
-            ( Playing <| cleanGame randomBoard, Cmd.none )
+            let
+                game =
+                    cleanGame randomBoard
+            in
+            ( Playing game, cleanGame randomBoard |> gameEncoder |> saveGame )
 
         SelectTile id ->
             case model of
@@ -208,8 +403,16 @@ update msg model =
 
                         newModel =
                             evaluateVictory currentPlayer newGame
+
+                        cmd =
+                            case newModel of
+                                Playing _ ->
+                                    newGame |> gameEncoder |> saveGame
+
+                                _ ->
+                                    E.null |> saveGame
                     in
-                    ( newModel, Cmd.none )
+                    ( newModel, cmd )
 
                 _ ->
                     ( model, Cmd.none )
@@ -605,5 +808,5 @@ main =
         { view = view
         , init = init
         , update = update
-        , subscriptions = always Sub.none
+        , subscriptions = subscriptions
         }
