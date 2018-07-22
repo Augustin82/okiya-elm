@@ -197,10 +197,25 @@ gameDecoder : D.Decoder Game
 gameDecoder =
     P.decode Game
         |> P.required "board" boardDecoder
-        |> P.hardcoded []
-        -- no score yet
+        |> P.required "score" scoreDecoder
         |> P.required "player" playerDecoder
         |> P.required "selected" (D.nullable tileIdDecoder)
+
+
+scoreDecoder : D.Decoder Score
+scoreDecoder =
+    D.keyValuePairs D.int
+        |> D.map
+            (List.map
+                (Tuple.mapFirst
+                    (\s ->
+                        if s == "Red" then
+                            Red
+                        else
+                            Blue
+                    )
+                )
+            )
 
 
 boardDecoder : D.Decoder Board
@@ -228,7 +243,7 @@ gameEncoder : Game -> E.Value
 gameEncoder { board, score, player, selected } =
     E.object
         [ ( "board", boardEncoder board )
-        , ( "score", E.list [] )
+        , ( "score", scoreEncoder score )
         , ( "player", playerEncoder player )
         , ( "selected", selected |> Maybe.map E.int |> Maybe.withDefault E.null )
         ]
@@ -254,6 +269,13 @@ tileEncoder { tree, feature, player, id, selectable, coords } =
         , ( "selectable", E.bool selectable )
         , ( "coords", coordsEncoder coords )
         ]
+
+
+scoreEncoder : Score -> E.Value
+scoreEncoder score =
+    score
+        |> List.map (Tuple.mapFirst toString >> Tuple.mapSecond E.int)
+        |> E.object
 
 
 treeEncoder : Tree -> E.Value
@@ -351,9 +373,16 @@ tileIdDecoder =
     D.int
 
 
-cleanGame : List Tile -> Game
-cleanGame randomTiles =
-    { board = makeBoardFromTiles randomTiles, score = [ ( Red, 0 ), ( Blue, 0 ) ], player = Red, selected = Nothing }
+startScore : Score
+startScore =
+    [ ( Red, 0 )
+    , ( Blue, 0 )
+    ]
+
+
+cleanGame : Game
+cleanGame =
+    { board = [], score = startScore, player = Red, selected = Nothing }
 
 
 generateRandomBoard : Cmd Msg
@@ -373,6 +402,27 @@ type Msg
     | GameLoaded (Maybe Game)
 
 
+addBoard : Model -> List Tile -> Game
+addBoard model tiles =
+    let
+        newBoard =
+            makeBoardFromTiles tiles
+    in
+    (\g -> { g | board = newBoard }) <|
+        case model of
+            Playing game ->
+                game
+
+            Victory _ game ->
+                game
+
+            Draw game ->
+                game
+
+            Loading ->
+                cleanGame
+
+
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
@@ -384,12 +434,12 @@ update msg model =
                 Just game ->
                     ( Playing game, Cmd.none )
 
-        GeneratedRandomBoard randomBoard ->
+        GeneratedRandomBoard tiles ->
             let
                 game =
-                    cleanGame randomBoard
+                    addBoard model tiles
             in
-            ( Playing game, cleanGame randomBoard |> gameEncoder |> saveGame )
+            ( Playing game, game |> gameEncoder |> saveGame )
 
         SelectTile id ->
             case model of
@@ -513,13 +563,38 @@ evaluateVictory player game =
     if noTilesLeft game then
         Draw game
     else if noPlayLeft game then
-        Victory player game
+        winGame player game
     else if hasFullLine player game then
-        Victory player game
+        winGame player game
     else if hasSquare player game then
-        Victory player game
+        winGame player game
     else
         Playing game
+
+
+winGame : Player -> Game -> Model
+winGame winner game =
+    let
+        newScore =
+            game.score
+                |> List.map
+                    (\(( player, score ) as t) ->
+                        if player == winner then
+                            ( winner, score + 1 )
+                        else
+                            t
+                    )
+
+        loser =
+            if winner == Red then
+                Blue
+            else
+                Red
+
+        newGame =
+            { game | score = newScore, player = loser }
+    in
+    Victory winner newGame
 
 
 nextPlayer : Game -> Game
