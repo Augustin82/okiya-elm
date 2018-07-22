@@ -41,6 +41,7 @@ type alias Game =
     , score : Score
     , player : Player
     , selected : Maybe TileId
+    , showHelp : Bool
     }
 
 
@@ -200,6 +201,7 @@ gameDecoder =
         |> P.required "score" scoreDecoder
         |> P.required "player" playerDecoder
         |> P.required "selected" (D.nullable tileIdDecoder)
+        |> P.hardcoded False
 
 
 scoreDecoder : D.Decoder Score
@@ -382,7 +384,7 @@ startScore =
 
 cleanGame : Game
 cleanGame =
-    { board = [], score = startScore, player = Red, selected = Nothing }
+    { board = [], score = startScore, player = Red, selected = Nothing, showHelp = False }
 
 
 generateRandomBoard : Cmd Msg
@@ -400,6 +402,7 @@ type Msg
     | GeneratedRandomBoard (List Tile)
     | SelectTile Int
     | GameLoaded (Maybe Game)
+    | ToggleHelp
 
 
 addBoard : Model -> List Tile -> Game
@@ -423,9 +426,28 @@ addBoard model tiles =
                 cleanGame
 
 
+toggleHelp : Model -> Model
+toggleHelp model =
+    case model of
+        Playing game ->
+            Playing { game | showHelp = not game.showHelp }
+
+        Victory player game ->
+            Victory player { game | showHelp = not game.showHelp }
+
+        Draw game ->
+            Draw { game | showHelp = not game.showHelp }
+
+        Loading ->
+            Loading
+
+
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
+        ToggleHelp ->
+            ( toggleHelp model, Cmd.none )
+
         GameLoaded maybeGame ->
             case maybeGame of
                 Nothing ->
@@ -662,20 +684,79 @@ view model =
                     [ el [] <| text "Chargement en cours..." ]
 
                 Playing game ->
-                    [ viewInstructions, viewBoard game, resetButton ]
+                    [ viewInstructions game.showHelp, viewScore game, viewBoard game, resetButton ]
 
                 Draw game ->
-                    [ viewBoard game, viewDrawMessage, resetButton ]
+                    [ viewInstructions game.showHelp, viewScore game, viewBoard game, viewDrawMessage, resetButton ]
 
                 Victory player game ->
-                    [ viewBoard game, viewVictoryMessage player, resetButton ]
+                    [ viewInstructions game.showHelp, viewScore game, viewBoard game, viewVictoryMessage player, resetButton ]
 
 
-viewInstructions : Element msg
-viewInstructions =
-    paragraph []
-        [ text "À tour de rôle, chaque joueur remplace une tuile par un de ses pions. Le but du jeu est de former une ligne (horizontale, verticale, diagonale) de quatre pions, ou un carré de quatre pions. On ne peut choisir une tuile que si elle a un point commun (arbre ou symbole) avec la dernière tuile choisie."
+viewScore : Game -> Element Msg
+viewScore { score } =
+    let
+        getScore player =
+            score
+                |> List.filter (Tuple.first >> (==) player)
+                |> List.head
+                |> Maybe.map Tuple.second
+                |> Maybe.withDefault 0
+                |> toString
+    in
+    column []
+        [ el [ centerX ] <| text "Score"
+        , row [ spacing 20, width shrink, centerX ]
+            [ row [ spacing 10 ] [ playerTurnIndicator Red Red, getScore Red |> text ]
+            , text " - "
+            , row [ spacing 10 ] [ getScore Blue |> text, playerTurnIndicator Blue Blue ]
+            ]
         ]
+
+
+viewInstructions : Bool -> Element Msg
+viewInstructions showHelp =
+    el
+        [ below <|
+            if showHelp then
+                textColumn [ spacing 10, height <| px 400, Background.color <| Color.rgb 0 0 0, Font.color <| Color.rgb 255 255 255, padding 10, Font.justify ]
+                    [ paragraph []
+                        [ text "À tour de rôle, chaque joueur remplace une tuile par un de ses pions."
+                        ]
+                    , paragraph []
+                        [ text "On ne peut choisir une tuile que si elle a un point commun (arbre ou symbole) avec la dernière tuile choisie. Au début de la partie, on ne peut choisir qu'une tuile sur les bords."
+                        ]
+                    , textColumn []
+                        [ paragraph []
+                            [ text "Un joueur gagne quand :"
+                            ]
+                        , paragraph []
+                            [ text "- il forme une ligne (horizontale, verticale, diagonale) de quatre pions, ou"
+                            ]
+                        , paragraph []
+                            [ text "- il forme un carré de quatre pions, ou"
+                            ]
+                        , paragraph []
+                            [ text "- son adversaire n'a plus d'endroit où jouer."
+                            ]
+                        ]
+                    , paragraph []
+                        [ text "Si tous les joueurs placent leurs tuiles et qu'il n'y a pas de vainqueur, c'est un match nul."
+                        ]
+                    ]
+            else
+                none
+        , onMouseEnter ToggleHelp
+        , onMouseLeave ToggleHelp
+        , onClick ToggleHelp
+        , Font.underline
+        , pointer
+        , mouseOver <| [ Font.color <| Color.rgb 0 0 255 ]
+        , width fill
+        ]
+    <|
+        el [ alignRight ] <|
+            text "Comment jouer ?"
 
 
 resetButton : Element Msg
@@ -827,9 +908,9 @@ clickWrapper tile element =
     let
         clickAttrs =
             if tile.selectable then
-                [ htmlAttribute <| HA.style [ ( "cursor", "pointer" ) ], onClick <| SelectTile tile.id ]
+                [ pointer, onClick <| SelectTile tile.id ]
             else
-                [ htmlAttribute <| HA.style [ ( "cursor", "not-allowed" ) ], Background.color <| Color.rgba 0 0 0 0.3 ]
+                [ pointer, Background.color <| Color.rgba 0 0 0 0.3 ]
     in
     el (clickAttrs ++ [ height fill, width fill, Border.color <| Color.rgb 0 0 0 ]) <|
         element
