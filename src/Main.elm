@@ -677,20 +677,21 @@ selectTile id game =
 
 view : Model -> Html Msg
 view model =
-    layout [ padding 20 ] <|
-        column [ spacing 20, width shrink ] <|
-            case model of
-                Loading ->
-                    [ el [] <| text "Chargement en cours..." ]
+    layout [] <|
+        el [ padding 20, width <| px 600, centerX ] <|
+            column [ spacing 20 ] <|
+                case model of
+                    Loading ->
+                        [ el [] <| text "Chargement en cours..." ]
 
-                Playing game ->
-                    [ viewInstructions game.showHelp, viewScore game, viewBoard game, resetButton ]
+                    Playing game ->
+                        [ viewInstructions game.showHelp, viewScore game, viewBoard game, resetButton ]
 
-                Draw game ->
-                    [ viewInstructions game.showHelp, viewScore game, viewBoard game, viewDrawMessage, resetButton ]
+                    Draw game ->
+                        [ viewInstructions game.showHelp, viewScore game, viewBoard game, viewDrawMessage, resetButton ]
 
-                Victory player game ->
-                    [ viewInstructions game.showHelp, viewScore game, viewBoard game, viewVictoryMessage player, resetButton ]
+                    Victory player game ->
+                        [ viewInstructions game.showHelp, viewScore game, viewBoard game, viewVictoryMessage player, resetButton ]
 
 
 viewScore : Game -> Element Msg
@@ -719,31 +720,42 @@ viewInstructions showHelp =
     el
         [ below <|
             if showHelp then
-                textColumn [ spacing 10, height <| px 400, Background.color <| Color.rgb 0 0 0, Font.color <| Color.rgb 255 255 255, padding 10, Font.justify ]
-                    [ paragraph []
-                        [ text "À tour de rôle, chaque joueur remplace une tuile par un de ses pions."
+                el [ paddingEach { top = 10, bottom = 0, left = 0, right = 0 } ] <|
+                    textColumn
+                        [ spacing 10
+                        , height <| px 400
+                        , Background.color <| Color.rgb 0 0 0
+                        , Font.color <| Color.rgb 255 255 255
+                        , padding 10
+                        , Font.justify
+                        , alignRight
+                        , width shrink
+                        , height shrink
                         ]
-                    , paragraph []
-                        [ text "On ne peut choisir une tuile que si elle a un point commun (arbre ou symbole) avec la dernière tuile choisie. Au début de la partie, on ne peut choisir qu'une tuile sur les bords."
-                        ]
-                    , textColumn []
                         [ paragraph []
-                            [ text "Un joueur gagne quand :"
+                            [ text "À tour de rôle, chaque joueur remplace une tuile par un de ses pions."
                             ]
                         , paragraph []
-                            [ text "- il forme une ligne (horizontale, verticale, diagonale) de quatre pions, ou"
+                            [ text "On ne peut choisir une tuile que si elle a un point commun (arbre ou symbole) avec la dernière tuile choisie. Au début de la partie, on ne peut choisir qu'une tuile sur les bords."
+                            ]
+                        , textColumn []
+                            [ paragraph []
+                                [ text "Un joueur gagne quand :"
+                                ]
+                            , paragraph []
+                                [ text "- il forme une ligne (horizontale, verticale, diagonale) de quatre pions, ou"
+                                ]
+                            , paragraph []
+                                [ text "- il forme un carré de quatre pions, ou"
+                                ]
+                            , paragraph []
+                                [ text "- son adversaire n'a plus d'endroit où jouer."
+                                ]
                             ]
                         , paragraph []
-                            [ text "- il forme un carré de quatre pions, ou"
-                            ]
-                        , paragraph []
-                            [ text "- son adversaire n'a plus d'endroit où jouer."
+                            [ text "Si tous les joueurs placent leurs tuiles et qu'il n'y a pas de vainqueur, c'est un match nul."
                             ]
                         ]
-                    , paragraph []
-                        [ text "Si tous les joueurs placent leurs tuiles et qu'il n'y a pas de vainqueur, c'est un match nul."
-                        ]
-                    ]
             else
                 none
         , onMouseEnter ToggleHelp
